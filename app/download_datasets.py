@@ -1,5 +1,4 @@
 import os
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -8,26 +7,18 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 from remotezip import RemoteZip
 
+from logger import configure_logger, get_logger
+
 load_dotenv("../.env", override=True)
 
 # --- LOGGING CONFIGURATION ---
-log_file_env = os.getenv("LOG_FILE", "../logs/app.log")
-log_path = Path(log_file_env).resolve()
-log_path.parent.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        # Cast to string to ensure the type checker is satisfied
-        logging.FileHandler(str(log_path)),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+IS_PRODUCTION = os.getenv("PYTHON_ENV") == "production"
+configure_logger(IS_PRODUCTION, log_level="DEBUG")
+logger = get_logger();
 
 def validate_env():
     """Check if all required environment variables are set and paths exist."""
-    required_vars = ["DATASET_URL", "TRAIN_SPLIT", "DEV_SPLIT", "TEST_SPLIT", "DATASET_DIR"]
+    required_vars = ["DATASET_URL", "TRAIN_SPLIT", "DEV_SPLIT", "TEST_SPLIT", "DATASET_RAW_DIR"]
     missing = [var for var in required_vars if not os.getenv(var)]
 
     if missing:
@@ -129,7 +120,7 @@ if __name__ == "__main__":
                 os.getenv("DEV_SPLIT"),
                 os.getenv("TEST_SPLIT")
             ],
-            target_dir=os.getenv("DATASET_DIR"),
+            target_dir=os.getenv("DATASET_RAW_DIR"),
             max_workers=25
         )
     except Exception as e:

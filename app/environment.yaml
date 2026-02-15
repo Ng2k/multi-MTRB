@@ -13,6 +13,7 @@ dependencies:
   - numpy>=2.1.0
   - accelerate>=1.2.0
   - transformers>=4.48.0
+  - structlog
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu130
       - torch==2.10.0+cu130

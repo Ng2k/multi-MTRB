@@ -22,7 +22,6 @@ WORKDIR /app
 COPY environment.yaml .
 RUN mamba env create -f environment.yaml && \
     mamba clean -afy && \
-    # Remove unnecessary files like static libs and headers from the env
     find /opt/conda/envs/multi-MTRB -follow -type f -name '*.a' -delete && \
     find /opt/conda/envs/multi-MTRB -follow -type f -name '*.pyc' -delete
 
