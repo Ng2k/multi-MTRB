@@ -25,20 +25,29 @@ The project is designed for the DAIC-WOZ (Distress Analysis Interview Corpus), t
 The repository is architected following modular separation of concerns, ensuring that the high-stakes logic of model architecture is decoupled from volatile data-handling and experimental configurations.
 
 ```
-├── configs/                # Centralized YAML files for hyperparameter versioning
-├── data/                   # Local storage (Git-ignored) for DAIC-WOZ transcripts
-├── models/                 
-│   ├── encoder_branch.py   # Specialized Transformer wrappers (mT5/RoBERTa)
-│   ├── mil_head.py         # Reusable Gated Attention MIL pooling logic
-│   └── fusion.py           # Multi-modal fusion and classification heads
-├── utils/                  
-│   ├── preprocessing.py    # Automated cleaning and participant diarization
-│   └── logger.py           # Observability
-├── environment.yaml        # Deterministic Conda environment specification
-├── train.py                # Main execution engine for remote training
-|-- evaluate.py				# Evaluation script
-├── mock_data_gen.py        # Pipeline validation utility for pre-dataset access
-└── README.md               # Technical specification and operational manual
+|-- app/
+|	├── configs/            # YAML files for system and model configs
+|	|-- src/				# AI model core folder
+|	|-- tests/				# Unit/Integration tests
+|	|-- Dockerfile
+|	|-- environment.yaml	# Deterministic Conda/Mamba virtual environment
+|	|-- pyproject.toml
+|
+|-- data/					# Storage (Git-ignored) for DAIC-WOZ transcripts
+|	|-- raw/
+|	|-- clean/
+|	|-- dev_split.csv
+|	|-- test_split.csv
+|	|-- train_split.csv
+|
+|-- outputs/				# Model weight, metrics and charts after evaluation
+|
+|-- .dockerignore
+|-- .env
+|-- .gitignore
+|-- docker-compose.yaml
+|-- LICENSE
+└── README.md
 ```
 
 ## Technical Architecture
