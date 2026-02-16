@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 from remotezip import RemoteZip
 
-from logger import configure_logger, get_logger
+from src.utils.logger import configure_logger, get_logger
 
 load_dotenv("../.env", override=True)
 

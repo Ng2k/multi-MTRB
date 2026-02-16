@@ -7,8 +7,8 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 
-from logger import get_logger
-from scripts.cleaning.loader import ScriptLoader
+from src.utils.logger import get_logger
+from src.cleaning.loader import ScriptLoader
 
 logger = get_logger().bind(module="scripts.cleaning.parallel_processor")
 

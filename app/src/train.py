@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from logger import configure_logger, get_logger
-from scripts.cleaning.parallel_processor import ParallelCleaner
+from src.utils.logger import configure_logger, get_logger
+from src.cleaning.parallel_processor import ParallelCleaner
 
 
 # --- LOGGING CONFIGURATION ---
@@ -13,7 +13,7 @@ load_dotenv("../.env", override=True)
 IS_PRODUCTION = os.getenv("PYTHON_ENV") == "production"
 configure_logger(IS_PRODUCTION, log_level="DEBUG")
 
-from scripts.cleaning.loader import ScriptLoader
+from cleaning.loader import ScriptLoader
 
 
 logger = get_logger();

@@ -10,8 +10,8 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Callable, Optional, cast
 
-from logger import get_logger
-from scripts.cleaning.strategies import CleaningStrategies
+from src.utils.logger import get_logger
+from src.cleaning.strategies import CleaningStrategies
 
 logger = get_logger().bind(module="scripts.cleaning.loader")
 
@@ -78,7 +78,7 @@ class ScriptLoader:
 
         if not file_path.exists():
             local_logger.error("File check failed: transcript not found")
-            raise FileNotFoundError(f"Transcript not found: {file_path}")
+            return pd.DataFrame()
 
         try:
             # DAIC-WOZ is tab-separated (\t)
@@ -86,12 +86,12 @@ class ScriptLoader:
 
             if not isinstance(df_raw, pd.DataFrame):
                 local_logger.error("IO Error: loaded object is not a DataFrame")
-                raise ValueError("Loaded object is not a DataFrame")
+                return pd.DataFrame()
 
             if 'speaker' not in df_raw.columns or 'value' not in df_raw.columns:
                 local_logger.error("Validation Error: malformed CSV columns", 
                                    columns=list(df_raw.columns))
-                raise ValueError(f"Malformed CSV at {file_path}")
+                return pd.DataFrame()
 
             df_participant = df_raw[df_raw['speaker'] == 'Participant'].copy()
             df_participant = cast(pd.DataFrame, df_participant)

@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = """
+    --cov=src 
+    --cov-report=term-missing 
+    --cov-report=html:tests/htmlcov
+"""
+
+[tool.coverage.run]
+data_file = "tests/.coverage"
+source = ["src"]
+omit = ["tests/*", "**/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+

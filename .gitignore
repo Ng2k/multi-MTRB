@@ -211,3 +211,7 @@ data/
 
 # logs
 logs/
+
+# Documentation/Artifacts
+tests/htmlcov/
+tests/.coverage
