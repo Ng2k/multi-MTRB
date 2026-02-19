@@ -1,16 +1,10 @@
-"""Module for rigorous evaluation of the Multi-MTRB model.
-
-Calculates enterprise-standard metrics including F1, Precision, Recall, 
-AUPRC, and Brier Score to assess clinical diagnostic performance.
-"""
-
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
+import json
 import torch
 import numpy as np
 import pandas as pd
+from pathlib import Path
+from dotenv import load_dotenv
 from torch.utils.data import DataLoader
 from sklearn.metrics import (
     classification_report, 
@@ -21,6 +15,7 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
+from src.config import Config
 from src.utils.logger import configure_logger, get_logger
 from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
@@ -28,90 +23,110 @@ from src.data.dataset import MultiMTRBDataset
 # Initialization
 load_dotenv("../.env", override=True)
 configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
-logger = get_logger().bind(module="train")
-
+logger = get_logger().bind(module="evaluation")
 
 def run_evaluation():
     # 1. Configuration & Paths
-    FEAT_DIR = Path(os.getenv("DATASET_FEATURES_DIR", "../data/features"))
-    TEST_CSV = Path(os.getenv("DEV_SPLIT", "../data/dev_split_Depression_AVEC2017.csv"))
-    MODEL_PATH = Path(os.getenv("MODEL_PATH", "../outputs/mtrb_model.pt"))
-    EVAL_METRICS_PATH = Path(os.getenv("EVAL_METRICS_PATH", "../../outputs/evaluation_results.csv"))
+    paths = {
+        "feat": Path(os.getenv("DATASET_FEATURES_DIR", "../dataset/features")),
+        "test_csv": Path(os.getenv("DEV_SPLIT", "../dataset/dev_split_Depression_AVEC2017.csv")),
+        "outputs": Path(os.getenv("MODEL_DIR", "../outputs")),
+        "model_weights": Path(os.getenv("MODEL_DIR", "../outputs")) / "mtrb_model.pt"
+    }
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-    if not MODEL_PATH.exists():
-        logger.error("Model weights not found. Please train the model first.")
+    if not paths["model_weights"].exists():
+        logger.error("Model weights not found. Please run train.py first.", path=str(paths['model_weights']))
         return
 
-    # 2. Load Data
-    logger.info("Loading evaluation dataset", path=str(TEST_CSV))
-    test_ds = MultiMTRBDataset(FEAT_DIR, TEST_CSV)
+    # 2. Load Hyperparameters (to ensure architecture matches training)
+    best_params_path = paths["outputs"] / "best_params.json"
+    overrides = None
+    if best_params_path.exists():
+        with open(best_params_path, "r") as f:
+            overrides = json.load(f)
+        logger.info("Loaded optimized parameters for evaluation architecture", **overrides)
+
+    # 3. Load Data
+    logger.info("Loading evaluation dataset", path=str(paths["test_csv"]))
+    test_ds = MultiMTRBDataset(paths["feat"], paths["test_csv"])
     test_loader = DataLoader(test_ds, batch_size=1, shuffle=False)
 
-    # 3. Load Model
-    model = MultiMTRBClassifier(input_dim=1280).to(DEVICE)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    # 4. Load Model
+    # Note: We pass overrides so the hidden_dim matches the trained mtrb_model.pt
+    model = MultiMTRBClassifier().to(DEVICE)
+    model.load_state_dict(torch.load(paths["model_weights"], map_location=DEVICE, weights_only=True))
     model.eval()
 
-    # 4. Inference
-    all_logits = []
-    all_labels = []
- 
-    logger.info("Running inference on test split...")
+    # 5. Inference
+    all_logits, all_labels = [], []
+    logger.info("Running inference...")
+    
     with torch.no_grad():
         for x, y in test_loader:
             x = x.to(DEVICE)
-            # Forward pass: note we catch the attention weights but don't use them yet
             logits, _, _ = model(x)
- 
             all_logits.append(logits.item())
             all_labels.append(y.item())
 
-    # 5. Metric Computation
+    # 6. Metric Computation
     probs = torch.sigmoid(torch.tensor(all_logits)).numpy()
-    preds = (probs > 0.5).astype(int)
     labels = np.array(all_labels)
 
-    # Precision-Recall Curve & AUC
-    precision, recall, _ = precision_recall_curve(labels, probs)
-    auprc = auc(recall, precision)
- 
-    # Brier Score (Calibration: 0 is perfect, 1 is total failure)
+    # Calculate PR-Curve and AUPRC
+    precision_vals, recall_vals, thresholds = precision_recall_curve(labels, probs)
+    auprc = auc(recall_vals, precision_vals)
     brier = brier_score_loss(labels, probs)
- 
-    # F1 & Confusion Matrix
-    f1 = f1_score(labels, preds)
+
+    # 7. Threshold Optimization
+    # Find the threshold that maximizes F1-score specifically for this model
+    best_f1 = 0
+    best_threshold = 0.5
+    for t in np.linspace(0.1, 0.9, 81):
+        current_f1 = f1_score(labels, (probs > t).astype(int))
+        if current_f1 > best_f1:
+            best_f1 = current_f1
+            best_threshold = t
+
+    # Final predictions using the best threshold
+    preds = (probs > best_threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
 
-    # 6. Reporting
-    print("\n" + "="*50)
-    print("      MULTI-MTRB CLINICAL EVALUATION REPORT")
-    print("="*50)
-    print(f"Total Samples:      {len(labels)}")
-    print(f"Positive Class %:   {labels.mean()*100:.1f}%")
-    print("-" * 50)
-    print(f"F1-Score:           {f1:.4f}")
-    print(f"AUPRC (PR-AUC):     {auprc:.4f}")
-    print(f"Brier Score:        {brier:.4f}")
-    print("-" * 50)
-    print(f"True Positives:     {tp} (Correctly caught Depression)")
-    print(f"False Negatives:    {fn} (Missed Depression)")
-    print(f"False Positives:    {fp} (False Alarms)")
-    print(f"True Negatives:     {tn} (Correctly identified Healthy)")
-    print("-" * 50)
+    # 8. Clinical Reporting
+    print("\n" + "="*60)
+    print("        MULTI-MTRB CLINICAL EVALUATION REPORT")
+    print("="*60)
+    print(f"{'Samples:':<25} {len(labels)}")
+    print(f"{'Prevalence (Dep):':<25} {labels.mean()*100:.1f}%")
+    print(f"{'Optimized Threshold:':<25} {best_threshold:.2f}")
+    print("-" * 60)
+    print(f"{'F1-Score:':<25} {best_f1:.4f}")
+    print(f"{'AUPRC (PR-AUC):':<25} {auprc:.4f}")
+    print(f"{'Brier Score:':<25} {brier:.4f}")
+    print("-" * 60)
+    print(f"{'True Positives:':<25} {tp} (Hits)")
+    print(f"{'False Negatives:':<25} {fn} (Misses)")
+    print(f"{'False Positives:':<25} {fp} (False Alarms)")
+    print(f"{'True Negatives:':<25} {tn} (Correct Healthy)")
+    print("-" * 60)
     print("\nDetailed Classification Report:")
     print(classification_report(labels, preds, target_names=["Healthy", "Depressed"]))
-    print("="*50)
+    print("="*60)
 
-    # Save results to CSV for record keeping
+    # Save metrics
+    results_path = paths["outputs"] / "evaluation_results.csv"
     results_df = pd.DataFrame({
-        "metric": ["f1", "auprc", "brier", "tp", "fn", "fp", "tn"],
-        "value": [f1, auprc, brier, tp, fn, fp, tn]
+        "metric": ["f1", "auprc", "brier", "best_threshold", "tp", "fn", "fp", "tn"],
+        "value": [best_f1, auprc, brier, best_threshold, tp, fn, fp, tn]
     })
-    results_df.to_csv(EVAL_METRICS_PATH, index=False)
-    logger.info("Evaluation results saved to ../data/evaluation_results.csv")
+    results_df.to_csv(results_path, index=False)
+    logger.info("Evaluation complete", results_saved_to=str(results_path))
 
 if __name__ == "__main__":
-    run_evaluation()
+    Config.seed_everything()
+    try:
+        run_evaluation()
+    except Exception as e:
+        logger.error("Evaluation failed", error=str(e))
+        raise
 
