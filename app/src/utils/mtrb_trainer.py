@@ -1,91 +1,70 @@
-import os
 import torch
 import torch.nn as nn
+import pandas as pd
 from pathlib import Path
-from dotenv import load_dotenv
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import f1_score
-
-from src.utils.logger import configure_logger, get_logger
+from typing import Dict, Any, Optional
+from src.config import Config
 from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
-from src.config import Config
+from src.utils.logger import get_logger
 
-load_dotenv("../.env", override=True)
-configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
-logger = get_logger().bind(module="train_pipeline")
+logger = get_logger().bind(module="mtrb_trainer")
 
 class MTRBTrainer:
-    def __init__(self, device, feat_dir, model_dir, overrides=None):
-        self.device = device
-        self.feat_dir = feat_dir
-        self.model_dir = Path(model_dir)
-        self.model_dir.mkdir(parents=True, exist_ok=True)
- 
-        # --- Hyperparameter injection ---
+    def __init__(self, device: str, features_dir: Path, output_dir: Path, overrides: Optional[Dict[str, Any]] = None):
+        self.device = torch.device(device)
+        self.features_dir = features_dir
+        self.output_dir = output_dir
         self.overrides = overrides or {}
-        self.lr = self.overrides.get("learning_rate", 5e-4)
-        self.pos_weight_val = self.overrides.get("pos_weight", 2.0)
-        self.hidden_dim = self.overrides.get("hidden_dim", 512)
 
 
-    def _get_criterion(self):
-        pos_weight = torch.tensor([self.pos_weight_val]).to(self.device)
-        return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    def _get_model(self) -> MultiMTRBClassifier:
+        return MultiMTRBClassifier(
+            input_dim=Config.INPUT_DIM,
+            hidden_dim=int(self.overrides.get("hidden_dim", 256)),
+            temperature=float(self.overrides.get("temperature", 0.5))
+        ).to(self.device)
 
 
-    def validate(self, model, loader, criterion):
-        model.eval()
-        val_loss, preds, labels = 0, [], []
-        with torch.no_grad():
-            for x, y in loader:
-                x, y = x.to(self.device), y.to(self.device).unsqueeze(1)
-                logits, _, _ = model(x)
-                val_loss += criterion(logits, y).item()
-                preds.extend((torch.sigmoid(logits) > 0.5).int().cpu().numpy())
-                labels.extend(y.int().cpu().numpy())
-        return val_loss / len(loader), f1_score(labels, preds)
-
-
-    def run_fold(self, fold_idx, train_df, val_df, save_model=True):
-        tmp_train, tmp_val = Path(f"tmp_tr_{fold_idx}.csv"), Path(f"tmp_vl_{fold_idx}.csv")
+    def run_fold(self, fold_idx: int, train_df: pd.DataFrame, val_df: pd.DataFrame, save_model: bool = True) -> float:
+        tmp_train, tmp_val = self.output_dir / f"t_{fold_idx}.csv", self.output_dir / f"v_{fold_idx}.csv"
         train_df.to_csv(tmp_train, index=False); val_df.to_csv(tmp_val, index=False)
 
-        try:
-            train_loader = DataLoader(MultiMTRBDataset(self.feat_dir, tmp_train), batch_size=4, shuffle=True)
-            val_loader = DataLoader(MultiMTRBDataset(self.feat_dir, tmp_val), batch_size=1, shuffle=False)
+        train_ds = MultiMTRBDataset(self.features_dir, tmp_train, max_seq=Config.MAX_SEQ_LEN)
+        val_ds = MultiMTRBDataset(self.features_dir, tmp_val, max_seq=Config.MAX_SEQ_LEN)
+        train_loader = DataLoader(train_ds, batch_size=Config.BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=Config.BATCH_SIZE, shuffle=False)
 
-            model = MultiMTRBClassifier().to(self.device)
- 
-            criterion = self._get_criterion()
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=1e-4)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+        model = self._get_model()
+        optimizer = torch.optim.Adam(model.parameters(), lr=float(self.overrides.get("learning_rate", 1e-4)))
+        p_weight = torch.tensor([float(self.overrides.get("pos_weight", 1.0))]).to(self.device)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=p_weight)
 
-            best_f1, patience_counter = 0, 0
-            fold_path = self.model_dir / f"mtrb_fold_{fold_idx}.pt"
+        best_f1 = 0.0
+        for epoch in range(Config.MAX_EPOCHS):
+            model.train()
+            for x, y in train_loader:
+                x, y = x.to(self.device), y.to(self.device).view(-1, 1)
+                optimizer.zero_grad()
+                logits, _, _ = model(x)
+                loss = criterion(logits, y)
+                loss.backward(); optimizer.step()
 
-            for epoch in range(1, Config.MAX_EPOCHS + 1):
-                model.train()
-                for bx, by in train_loader:
-                    bx, by = bx.to(self.device), by.to(self.device).unsqueeze(1)
-                    logits, _, _ = model(bx)
-                    loss = criterion(logits, by)
-                    optimizer.zero_grad(); loss.backward(); optimizer.step()
+            model.eval()
+            preds, targets = [], []
+            with torch.no_grad():
+                for x, y in val_loader:
+                    logits, _, _ = model(x.to(self.device))
+                    preds.extend((torch.sigmoid(logits) > 0.5).int().cpu().numpy().flatten().tolist())
+                    targets.extend(y.numpy().astype(int).flatten().tolist())
 
-                v_loss, v_f1 = self.validate(model, val_loader, criterion)
-                scheduler.step(v_loss)
+            f1 = float(f1_score(targets, preds, zero_division=0.0)) # type: ignore
+            if f1 > best_f1:
+                best_f1 = f1
+                if save_model: torch.save(model.state_dict(), self.output_dir / f"mtrb_fold_{fold_idx}.pt")
 
-                if v_f1 > best_f1:
-                    best_f1 = v_f1
-                    patience_counter = 0
-                    if save_model: torch.save(model.state_dict(), fold_path)
-                else:
-                    patience_counter += 1
-                if patience_counter >= 25: break
-
-            return best_f1
-        finally:
-            if tmp_train.exists(): tmp_train.unlink()
-            if tmp_val.exists(): tmp_val.unlink()
+        tmp_train.unlink(); tmp_val.unlink()
+        return best_f1
 

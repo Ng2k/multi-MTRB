@@ -11,6 +11,8 @@ class Config:
     MAX_SEQ_LEN = 300
     MAX_EPOCHS = 100
     NUM_SEARCH_TRIALS = 20
+    N_SPLITS = 5
+    BATCH_SIZE = 32
 
     # --- REPRODUCIBILITY UTILITY ---
     @staticmethod

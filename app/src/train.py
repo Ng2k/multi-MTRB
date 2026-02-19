@@ -7,17 +7,19 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sklearn.model_selection import StratifiedKFold
 
-from src.config import Config
+
 from src.utils.logger import configure_logger, get_logger
-from src.utils.mtrb_trainer import MTRBTrainer
-from src.cleaning.parallel_processor import ParallelCleaner
-from src.features.manager import FeatureManager
 
 # --- Configuration & Setup ---
 load_dotenv("../.env", override=True)
 configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
 logger = get_logger().bind(module="train_pipeline")
 
+from src.config import Config
+from src.utils.mtrb_trainer import MTRBTrainer
+from src.cleaning.parallel_processor import ParallelCleaner
+from src.features.manager import FeatureManager
+from src.data.dataset import MultiMTRBDataset
 
 def run_full_pipeline():
     # 1. Resource Initialization
@@ -39,55 +41,56 @@ def run_full_pipeline():
     # 3. Load Hyperparameters
     best_params_path = paths["outputs"] / "best_params.json"
     overrides = None
- 
     if best_params_path.exists():
         with open(best_params_path, "r") as f:
             overrides = json.load(f)
-        logger.info("Using optimized hyperparameters from RandomSearch", **overrides)
-    else:
-        logger.info("No optimized params found. Using default Config settings.")
 
-    # 4. K-Fold Preparation
-    df = pd.read_csv(paths["train_csv"])
-    df.columns = [c.strip() for c in df.columns]
-    y = df['PHQ8_Binary'].values
+    # 4. Dataset and Stratification Preparation
+    # We load the full CSV here to ensure trainer compatibility
+    full_df = pd.read_csv(paths["train_csv"])
+    full_df.columns = [c.strip() for c in full_df.columns]
 
-    # We use Config.SEED to ensure the K-Fold split is identical to the one used in search
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.SEED)
- 
-    # Initialize trainer with potential overrides
+    # We must use the dataset to ensure we only include participants with feature files
+    full_dataset = MultiMTRBDataset(paths["feat"], paths["train_csv"], max_seq=Config.MAX_SEQ_LEN)
+
+    # Filter the DataFrame to only include PIDs present in the processed dataset
+    valid_pids = [f.name.split("_")[0] for f in full_dataset.file_list]
+    id_col = next(c for c in full_df.columns if c.lower() in ['participant_id', 'id'])
+    filtered_df = full_df[full_df[id_col].astype(str).isin(valid_pids)].reset_index(drop=True)
+
+    # Extract labels for stratification based on the filtered DataFrame
+    label_col = next(c for c in filtered_df.columns if c.lower() in ['phq8_binary', 'phq_binary'])
+    y_stratify = filtered_df[label_col].values
+
+    # 5. K-Fold Execution
+    skf = StratifiedKFold(n_splits=Config.N_SPLITS, shuffle=True, random_state=Config.SEED)
     trainer = MTRBTrainer(device, paths["feat"], paths["outputs"], overrides=overrides)
     fold_results = []
 
-    # 5. Cross-Validation Loop
-    logger.info("Starting 5-Fold Cross-Validation")
-    for fold, (t_idx, v_idx) in enumerate(skf.split(df, y), 1):
-        f1 = trainer.run_fold(fold, df.iloc[t_idx], df.iloc[v_idx], save_model=True)
+    logger.info("Starting 5-Fold Cross-Validation (with Positional Encoding)")
+
+    for fold, (t_idx, v_idx) in enumerate(skf.split(filtered_df, y_stratify), 1):
+        train_df_fold = filtered_df.iloc[t_idx]
+        val_df_fold = filtered_df.iloc[v_idx]
+
+        f1 = trainer.run_fold(fold, train_df_fold, val_df_fold, save_model=True)
         fold_results.append(f1)
         logger.info(f"Fold {fold} Complete", f1=round(f1, 4))
 
-    # 6. Finalize Best Model
+    # 6. Finalize Best Model (Model Promotion)
     avg_f1 = np.mean(fold_results)
-    std_f1 = np.std(fold_results)
     best_fold_idx = np.argmax(fold_results) + 1
- 
-    # Copy weights of the best performing fold to a generic production file
+
     best_weights_path = paths["outputs"] / f"mtrb_fold_{best_fold_idx}.pt"
     production_path = paths["outputs"] / "mtrb_model.pt"
- 
     if best_weights_path.exists():
-        best_weights = torch.load(best_weights_path, weights_only=True)
+        best_weights = torch.load(best_weights_path, map_location=device, weights_only=True)
         torch.save(best_weights, production_path)
-        logger.info("Best fold weights promoted to production model", best_fold=best_fold_idx)
- 
-    logger.info("Pipeline Finished Successfully", 
-                avg_f1=round(avg_f1, 4), 
-                std_f1=round(std_f1, 4),
-                best_fold=best_fold_idx)
+
+    logger.info("Pipeline Finished Successfully", avg_f1=round(avg_f1, 4), best_fold=best_fold_idx)
 
 if __name__ == "__main__":
     Config.seed_everything()
- 
     try:
         run_full_pipeline()
     except Exception as e:
