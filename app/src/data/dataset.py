@@ -4,29 +4,15 @@ Multi-MTRB Dataset module for handling Multiple Instance Learning bags.
 
 from pathlib import Path
 import torch
-import pandas as pd
 from torch.utils.data import Dataset
+
+from src.data.labels import load_labels
 
 class MultiMTRBDataset(Dataset):
     def __init__(self, features_dir: Path, labels_csv: Path, max_seq=300):
         self.features_dir = features_dir
         self.max_seq = max_seq
- 
-        df = pd.read_csv(labels_csv)
-        df.columns = [c.strip() for c in df.columns]
- 
-        pid_col = next((c for c in df.columns if c.lower() in ['participant_id', 'id']), None)
-        label_col = next((c for c in df.columns if c.lower() in ['phq8_binary', 'phq_binary']), None)
-
-        if pid_col is None:
-            raise KeyError(f"Could not find ID column in {labels_csv}")
-
-        if label_col is None:
-            print(f"INFO: No labels found in {labels_csv.name}. Evaluation metrics will not be possible.")
-            self.labels = {str(pid): -1 for pid in df[pid_col]}
-        else:
-            self.labels = dict(zip(df[pid_col].astype(str), df[label_col]))
- 
+        self.labels = load_labels(labels_csv)
         self.file_list = [
             f for f in features_dir.glob("*.pt") 
             if f.name.split("_")[0] in self.labels
@@ -58,3 +44,4 @@ class MultiMTRBDataset(Dataset):
             features = torch.cat([features, padding], dim=0)
 
         return features, torch.tensor(label, dtype=torch.float32)
+
