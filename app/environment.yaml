@@ -21,6 +21,7 @@ dependencies:
   - structlog
   - pytest
   - pytest-cov
+  - pytorch-metric-learning
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu124
       - torch

@@ -11,6 +11,7 @@ from pathlib import Path
 from collections import Counter
 from dotenv import load_dotenv
 
+from src.config import Config
 from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
 from src.utils.logger import configure_logger, get_logger
@@ -44,12 +45,21 @@ class UnifiedXAISuite:
 
 
     def _load_model(self):
-        with open(self.paths["params"], "r") as f:
-            overrides = json.load(f)
+        # 1. Load the search results to find the correct architecture
+        overrides = {}
+        if self.paths["params"].exists():
+            with open(self.paths["params"], "r") as f:
+                overrides = json.load(f)
+
+        # 2. Initialize with the dynamic n_heads and hidden_dim
         model = MultiMTRBClassifier(
-            hidden_dim=overrides.get("hidden_dim", 512),
-            temperature=overrides.get("temperature", 0.33)
+            input_dim=Config.INPUT_DIM,
+            hidden_dim=int(overrides.get("hidden_dim", 256)),
+            temperature=float(overrides.get("temperature", 0.5)),
+            n_heads=int(overrides.get("n_heads", 4)) # This matches the 8 heads in your weights
         ).to(self.device)
+
+        # 3. Load the weights
         model.load_state_dict(torch.load(self.paths["weights"], map_location=self.device, weights_only=True))
         model.eval()
         return model

@@ -29,10 +29,16 @@ class Config:
 
     # --- SEARCH SPACE ---
     SEARCH_SPACE = {
-        "learning_rate": lambda: 10**np.random.uniform(-5, -3), 
+        "learning_rate": lambda: 10**np.random.uniform(-5, -3),
         "pos_weight": lambda: round(np.random.uniform(1.0, 4.0), 2),
-        "temperature": lambda: round(np.random.uniform(0.5, 2.0), 2),
+        "temperature": lambda: round(np.random.uniform(0.3, 0.7), 2),
         "hidden_dim": lambda: int(np.random.choice([256, 512, 768])),
+        "n_heads": lambda: int(np.random.choice([2, 4, 8])),
+        "gamma": lambda: round(np.random.uniform(1.0, 3.0), 1),
+        "alpha": lambda: round(np.random.uniform(0.2, 0.8), 2),
+        "entropy_lambda": lambda: round(np.random.uniform(0.01, 0.03), 4),
+        "contrastive_lambda": lambda: round(np.random.uniform(0.05, 0.2), 2),
+        "sharpness_lambda": lambda: round(np.random.uniform(0.001, 0.01), 4),
     }
 
     @staticmethod

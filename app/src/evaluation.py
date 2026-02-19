@@ -2,23 +2,16 @@ import os
 import json
 import torch
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
 from pathlib import Path
 from dotenv import load_dotenv
-from torch.utils.data import DataLoader
-from sklearn.metrics import (
-    classification_report, 
-    precision_recall_curve, 
-    auc, 
-    confusion_matrix
-)
+from sklearn.metrics import classification_report, precision_recall_curve, auc
 
 from src.config import Config
-from src.utils.logger import configure_logger, get_logger
 from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
+from src.utils.logger import configure_logger, get_logger
 
+# --- Configuration & Setup ---
 load_dotenv("../.env", override=True)
 configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
 logger = get_logger().bind(module="evaluation")
@@ -26,70 +19,93 @@ logger = get_logger().bind(module="evaluation")
 def run_evaluation():
     paths = {
         "feat": Path(os.getenv("DATASET_FEATURES_DIR", "../dataset/features")),
-        "clean": Path(os.getenv("DATASET_CLEAN_DIR", "../dataset/clean")),
-        "test_csv": Path(os.getenv("DEV_SPLIT", "../dataset/dev_split_Depression_AVEC2017.csv")),
+        "test_csv": Path(os.getenv("TEST_SPLIT", "../dataset/dev_split_Depression_AVEC2017.csv")),
         "outputs": Path(os.getenv("MODEL_DIR", "../outputs")),
-        "model_weights": Path(os.getenv("MODEL_DIR", "../outputs")) / "mtrb_model.pt"
+        "model_weights": Path(os.getenv("MODEL_DIR", "../outputs")) / "mtrb_model.pt",
+        "best_params": Path(os.getenv("MODEL_DIR", "../outputs")) / "best_params.json"
     }
 
-    # 1. Load optimized architecture params
-    best_params_path = paths["outputs"] / "best_params.json"
+    # 1. Load Hyperparameters to prevent architecture mismatch (Phase 4 fix)
     overrides = {}
-    if best_params_path.exists():
-        with open(best_params_path, "r") as f:
+    if paths["best_params"].exists():
+        with open(paths["best_params"], "r") as f:
             overrides = json.load(f)
+        logger.info("Loaded hyperparameters from random search", **overrides)
+    else:
+        logger.warning("best_params.json not found, using default architecture")
 
-    # 2. Setup Data (with Speaker Filtering)
-    test_ds = MultiMTRBDataset(paths["feat"], paths["test_csv"], clean_dir=paths["clean"])
-    test_loader = DataLoader(test_ds, batch_size=1, shuffle=False)
-
-    # 3. Initialize Model
+    # 2. Initialize Model with the correct dimensions and heads
     model = MultiMTRBClassifier(
-        hidden_dim=overrides.get("hidden_dim", 512),
-        temperature=overrides.get("temperature", 0.33)
+        input_dim=Config.INPUT_DIM,
+        hidden_dim=int(overrides.get("hidden_dim", 256)),
+        temperature=float(overrides.get("temperature", 0.5)),
+        n_heads=int(overrides.get("n_heads", 4)) # Matches saved weight shapes
     ).to(Config.DEVICE)
+
+    # 3. Load State Dict
+    if not paths["model_weights"].exists():
+        logger.error(f"Model weights not found at {paths['model_weights']}")
+        return
+
     model.load_state_dict(torch.load(paths["model_weights"], map_location=Config.DEVICE, weights_only=True))
     model.eval()
 
-    # 4. Inference
-    all_probs, all_labels = [], []
+    # 4. Prepare Evaluation Dataset
+    test_ds = MultiMTRBDataset(paths["feat"], paths["test_csv"], max_seq=Config.MAX_SEQ_LEN)
+
+    all_probs = []
+    all_targets = []
+
+    logger.info("Starting Clinical Inference")
     with torch.no_grad():
-        for x, y in test_loader:
-            logits, _, _ = model(x.to(Config.DEVICE))
-            all_probs.append(torch.sigmoid(logits).item())
-            all_labels.append(y.item())
+        for i in range(len(test_ds)):
+            x, y = test_ds[i]
+            x = x.unsqueeze(0).to(Config.DEVICE)
 
-    probs = np.array(all_probs)
-    labels = np.array(all_labels)
+            logits, _, _ = model(x)
+            prob = torch.sigmoid(logits).item()
 
-    # 5. Clinical Optimization (Targeting 75% Recall)
-    precision_vals, recall_vals, thresholds = precision_recall_curve(labels, probs)
-    clinical_idx = np.where(recall_vals >= 0.75)[0][-1]
-    clinical_threshold = thresholds[min(clinical_idx, len(thresholds)-1)]
+            all_probs.append(prob)
+            all_targets.append(int(y.item()))
 
-    preds = (probs >= clinical_threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+    # 5. Clinical Thresholding (Targeting 75% Recall for Phase 3/4)
+    precisions, recalls, thresholds = precision_recall_curve(all_targets, all_probs)
 
-    # 6. Save Clinical Config for XAI
-    with open(paths["outputs"] / "clinical_config.json", "w") as f:
-        json.dump({"threshold": float(clinical_threshold)}, f)
+    # Find the threshold that yields at least 75% recall
+    target_recall = 0.75
+    idx = np.where(recalls >= target_recall)[0][-1]
+    clinical_threshold = thresholds[idx]
 
-    # 7. Print Final Report
+    final_preds = [1 if p >= clinical_threshold else 0 for p in all_probs]
+    current_auprc = auc(recalls, precisions)
+
+    # 6. Generate Clinical Report
+    report = classification_report(
+        all_targets, 
+        final_preds, 
+        target_names=["Healthy", "Depressed"]
+    )
+
     print("\n" + "="*60)
-    print("        MULTI-MTRB CLINICAL EVALUATION (75% RECALL MODE)")
+    print(f"{'MULTI-MTRB CLINICAL EVALUATION (75% RECALL MODE)':^60}")
     print("="*60)
-    print(f"{'Clinical Threshold:':<25} {clinical_threshold:.4f}")
-    print(f"{'Recall (Sensitivity):':<25} {tp/(tp+fn):.1%}")
-    print(f"{'Precision:':<25} {tp/(tp+fp):.1%}")
-    print(f"{'AUPRC:':<25} {auc(recall_vals, precision_vals):.4f}")
+    print(f"Clinical Threshold:        {clinical_threshold:.4f}")
+    print(f"Recall (Sensitivity):      {recalls[idx]*100:.1f}%")
+    print(f"Precision:                 {precisions[idx]*100:.1f}%")
+    print(f"AUPRC:                     {current_auprc:.4f}")
     print("-" * 60)
-    print(f"{'True Positives:':<25} {tp} (Hits)")
-    print(f"{'False Negatives:':<25} {fn} (Misses)")
-    print(f"{'False Positives:':<25} {fp} (False Alarms)")
+
+    tp = sum((p == 1 and t == 1) for p, t in zip(final_preds, all_targets))
+    fn = sum((p == 0 and t == 1) for p, t in zip(final_preds, all_targets))
+    fp = sum((p == 1 and t == 0) for p, t in zip(final_preds, all_targets))
+
+    print(f"True Positives:            {tp} (Hits)")
+    print(f"False Negatives:           {fn} (Misses)")
+    print(f"False Positives:           {fp} (False Alarms)")
     print("-" * 60)
     print("\nDetailed Clinical Classification Report:")
-    print(classification_report(labels, preds, target_names=["Healthy", "Depressed"]))
-    print("="*60)
+    print(report)
+    print("="*60 + "\n")
 
 if __name__ == "__main__":
     run_evaluation()
