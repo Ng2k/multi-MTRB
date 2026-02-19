@@ -16,6 +16,8 @@ dependencies:
   - sentencepiece
   - protobuf
   - tiktoken
+  - matplotlib
+  - seaborn
   - structlog
   - pytest
   - pytest-cov

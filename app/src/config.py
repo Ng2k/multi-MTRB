@@ -7,6 +7,7 @@ class Config:
     SEED = 42 
 
     # --- DEFAULTS ---
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     INPUT_DIM = 1280
     MAX_SEQ_LEN = 300
     MAX_EPOCHS = 100
@@ -30,7 +31,7 @@ class Config:
     SEARCH_SPACE = {
         "learning_rate": lambda: 10**np.random.uniform(-5, -3), 
         "pos_weight": lambda: round(np.random.uniform(1.0, 4.0), 2),
-        "temperature": lambda: round(np.random.uniform(0.1, 0.9), 2),
+        "temperature": lambda: round(np.random.uniform(0.5, 2.0), 2),
         "hidden_dim": lambda: int(np.random.choice([256, 512, 768])),
     }
 
