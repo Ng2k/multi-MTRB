@@ -53,7 +53,7 @@ class MultiMTRBExtractor:
         self.roberta_tokenizer = AutoTokenizer.from_pretrained(roberta_name)
         self.roberta_model = AutoModel.from_pretrained(roberta_name).to(self.device)
  
-        # Initialize mT5 (Encoder only for feature extraction)
+        # Initialize mT5
         self.mt5_tokenizer = AutoTokenizer.from_pretrained(mt5_name)
         self.mt5_model = MT5EncoderModel.from_pretrained(mt5_name).to(self.device)
  

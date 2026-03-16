@@ -33,6 +33,8 @@ class CleaningStrategies:
         """
         Removes DAIC-WOZ metadata tags enclosed in brackets.
         Example: "I am [laughter] happy" -> "I am  happy"
+
+        TODO: pensare di lasciare i tag (analizza i risultati con e senza)
         """
         return re.sub(r'\[.*?\]', '', text)
 
