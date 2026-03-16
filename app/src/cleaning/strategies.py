@@ -29,14 +29,21 @@ class CleaningStrategies:
     """
 
     @staticmethod
-    def remove_daic_tags(text: str) -> str:
+    def preserve_clinical_tags(text: str) -> str:
         """
-        Removes DAIC-WOZ metadata tags enclosed in brackets.
-        Example: "I am [laughter] happy" -> "I am  happy"
+        Converts clinical markers into unique tokens instead of deleting them.
+        Example: "I am [laughter] okay" -> "I am DAIC_LAUGHTER okay"
+        """
+        # 1. Standardize clinical tags you want to keep
+        clinical_markers = ['laughter', 'sigh', 'pause', 'cough']
 
-        TODO: pensare di lasciare i tag (analizza i risultati con e senza)
-        """
-        return re.sub(r'\[.*?\]', '', text)
+        for marker in clinical_markers:
+            text = re.sub(rf'\[{marker}\]', f' DAIC_{marker.upper()} ', text, flags=re.IGNORECASE)
+
+        # 2. Clean up noise tags
+        text = re.sub(r'\[.*?\]', '', text)
+
+        return text
 
     @staticmethod
     def lowercase(text: str) -> str:

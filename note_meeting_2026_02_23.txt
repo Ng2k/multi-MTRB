@@ -1,7 +1,7 @@
-1- bilanciare dataset
-2- controllare tag []
-3- mantieni recall e precision + curva AUPRC
-4- Analizza meglio dataset (dimensioni, linee di interviste)
-5- Analizza embedding perchè potrebbe essere poco descrittivo. Magari usare ensemble di embedding e
+[x] - bilanciare dataset
+[x] - controllare tag []
+[x] - mantieni recall e precision + curva AUPRC
+[x] - Analizza meglio dataset (dimensioni, linee di interviste)
+[] - Analizza embedding perchè potrebbe essere poco descrittivo. Magari usare ensemble di embedding e
 poi metodo di aggregazione dei vari embedding
-6- Aggiungere intervalli di confidenza come metodo di valutazione dei fold.
+[] - Aggiungere intervalli di confidenza come metodo di valutazione dei fold.

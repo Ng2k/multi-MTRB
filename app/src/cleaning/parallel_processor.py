@@ -10,7 +10,6 @@ from typing import List, Dict, Any, Optional
 from src.utils.logger import get_logger
 from src.cleaning.loader import ScriptLoader
 
-logger = get_logger().bind(module="scripts.cleaning.parallel_processor")
 
 def _process_single_file(file_path: Path, output_dir: Path) -> Dict[str, Any]:
     """Worker function executed in separate processes.
@@ -52,6 +51,7 @@ class ParallelCleaner:
         Args:
             max_workers: Number of processes. Defaults to number of CPU cores.
         """
+        self.logger = get_logger().bind(module="scripts.cleaning.parallel_processor")
         self.max_workers = max_workers or os.cpu_count()
 
     def run(self, input_dir: Path, output_dir: Path) -> List[Dict[str, Any]]:
@@ -72,7 +72,7 @@ class ParallelCleaner:
         ]
         total_files = len(transcript_files)
 
-        logger.info("Starting parallel cleaning", 
+        self.logger.info("Starting parallel cleaning", 
                     total_files=total_files, 
                     workers=self.max_workers)
 
@@ -88,9 +88,9 @@ class ParallelCleaner:
                 res = future.result()
                 results.append(res)
                 if res["status"] == "error":
-                    logger.error("File processing failed", file=res["id"], error=res["error"])
+                    self.logger.error("File processing failed", file=res["id"], error=res["error"])
 
-        logger.info("Parallel cleaning complete", 
+        self.logger.info("Parallel cleaning complete", 
                     success_count=len([r for r in results if r["status"] == "success"]),
                     error_count=len([r for r in results if r["status"] == "error"]))
 

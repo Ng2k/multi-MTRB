@@ -19,8 +19,6 @@ import torch
 from src.features.text_extractor import MultiMTRBExtractor
 from src.utils.logger import get_logger
 
-logger = get_logger().bind(module="features.manager")
-
 
 class FeatureManager:
     """Orchestrates high-speed bulk extraction of features using multi-threading.
@@ -41,13 +39,14 @@ class FeatureManager:
             input_dir: Path to directory with '*_CLEAN.csv' files.
             output_dir: Path to directory for '*_FEATURES.pt' files.
         """
+        self.logger = get_logger().bind(module="features.manager")
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
  
         self.extractor = MultiMTRBExtractor()
  
-        logger.info(
+        self.logger.info(
             "FeatureManager initialized for parallel execution", 
             input=str(input_dir), 
             output=str(output_dir)
@@ -83,7 +82,7 @@ class FeatureManager:
             }
 
         except Exception as e:
-            logger.exception("Task failed", id=participant_id, error=str(e))
+            self.logger.exception("Task failed", id=participant_id, error=str(e))
             return {"id": participant_id, "status": "error", "error": str(e)}
 
     def process_all(self, max_workers: int = 2) -> List[Dict[str, Any]]:
@@ -100,7 +99,7 @@ class FeatureManager:
         total_files = len(files)
         results = []
 
-        logger.info(
+        self.logger.info(
             "Starting parallel feature extraction", 
             total_files=total_files,
             concurrency=max_workers
@@ -118,7 +117,7 @@ class FeatureManager:
  
                 # Feedback on progress
                 if res["status"] != "skipped":
-                    logger.info(
+                    self.logger.info(
                         "Session processed", 
                         id=res["id"], 
                         status=res["status"],
@@ -128,7 +127,7 @@ class FeatureManager:
         success_count = len([r for r in results if r["status"] == "success"])
         skipped_count = len([r for r in results if r["status"] == "skipped"])
  
-        logger.info(
+        self.logger.info(
             "Bulk parallel extraction complete", 
             success=success_count,
             skipped=skipped_count,

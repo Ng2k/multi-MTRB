@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-from typing import Tuple
+from typing import Dict, Tuple
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int = 500):
@@ -53,16 +53,27 @@ class MultiMTRBClassifier(nn.Module):
             nn.Linear(512, 1) 
         )
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
         x = self.pos_encoder(x)
         head_outputs, head_weights = [], []
+
         for head in self.heads:
-            br, w = head(x)
-            head_outputs.append(br)
-            head_weights.append(w)
+            repr_h, weight_h = head(x)
+            head_outputs.append(repr_h)
+            head_weights.append(weight_h)
+
+        # Calculate Entropy Loss: -sum(p * log(p))
+        # head_weights shape is [n_heads, batch, seq_len, 1]
+        all_weights = torch.stack(head_weights) 
+        # Average across heads for a single distribution, or calculate per head
+        avg_weights = all_weights.mean(dim=0).squeeze(-1) # [batch, seq_len]
+
+        # Entropy calculation (add epsilon to avoid log(0))
+        entropy = -torch.sum(avg_weights * torch.log(avg_weights + 1e-8), dim=1)
+
         combined_repr = torch.cat(head_outputs, dim=-1)
-        bag_repr = self.output_projection(combined_repr)
-        logits = self.classifier(bag_repr)
-        avg_weights = torch.mean(torch.stack(head_weights), dim=0)
-        return logits, avg_weights, bag_repr
+        projected = self.output_projection(combined_repr)
+        logits = self.classifier(projected)
+
+        return logits, avg_weights, {"entropy": entropy.mean(), "gate": torch.tensor(0.0).to(x.device)}
 

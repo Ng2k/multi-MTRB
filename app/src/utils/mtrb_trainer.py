@@ -91,9 +91,10 @@ class MTRBTrainer:
 
                 optimizer.zero_grad()
                 with autocast(device_type='cuda', enabled=(self.device.type == 'cuda')):
-                    logits, _, _= model(x)
+                    logits, _, expert_losses = model(x)
                     ce_loss = criterion(logits, y)
-                    loss = ce_loss + float(self.overrides.get("contrastive_lambda", 0.05)) * 0.0
+                    e_lambda = float(self.overrides.get("entropy_lambda", 0.02))
+                    loss = ce_loss + e_lambda * expert_losses["entropy"]
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)

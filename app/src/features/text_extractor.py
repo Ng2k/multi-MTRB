@@ -18,8 +18,6 @@ from typing import List
 
 from src.utils.logger import get_logger
 
-logger = get_logger().bind(module="features.text_extractor")
-
 
 class MultiMTRBExtractor:
     """Orchestrates parallel feature extraction from RoBERTa and mT5 models.
@@ -47,6 +45,7 @@ class MultiMTRBExtractor:
             roberta_name: HuggingFace model identifier for RoBERTa.
             mt5_name: HuggingFace model identifier for mT5.
         """
+        self.logger = get_logger().bind(module="features.text_extractor")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
  
         # Initialize RoBERTa
@@ -60,7 +59,7 @@ class MultiMTRBExtractor:
         self.roberta_model.eval()
         self.mt5_model.eval()
  
-        logger.info(
+        self.logger.info(
             "Multi-MTRB Extractor initialized", 
             roberta=roberta_name, 
             mt5=mt5_name, 
@@ -132,7 +131,7 @@ class MultiMTRBExtractor:
         """
         utterances = df['value'].tolist()
         if not utterances:
-            logger.warning("Empty transcript provided for extraction")
+            self.logger.warning("Empty transcript provided for extraction")
             return torch.empty(0)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -145,7 +144,7 @@ class MultiMTRBExtractor:
         # Concatenate features: (Batch, 768 + 512) -> (Batch, 1280)
         combined_feats = torch.cat((roberta_feats, mt5_feats), dim=1)
  
-        logger.info(
+        self.logger.info(
             "Multi-MTRB session features extracted", 
             instances=combined_feats.shape[0], 
             total_dim=combined_feats.shape[1]

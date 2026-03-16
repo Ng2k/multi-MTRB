@@ -13,7 +13,6 @@ from typing import List, Callable, Optional, cast
 from src.utils.logger import get_logger
 from src.cleaning.strategies import CleaningStrategies
 
-logger = get_logger().bind(module="scripts.cleaning.loader")
 
 class ScriptLoader:
     """Orchestrator for loading and cleaning DAIC-WOZ transcripts.
@@ -35,14 +34,15 @@ class ScriptLoader:
                 the default research-standard pipeline including tag removal,
                 lowercasing, and whitespace normalization.
         """
+        self.logger = get_logger().bind(module="scripts.cleaning.loader")
         self.pipeline = pipeline or [
-            CleaningStrategies.remove_daic_tags,
+            CleaningStrategies.preserve_clinical_tags,
             CleaningStrategies.lowercase,
             CleaningStrategies.remove_special_chars,
             CleaningStrategies.collapse_whitespace,
             CleaningStrategies.strip_edges
         ]
-        logger.info("ScriptLoader initialized", pipeline_steps=len(self.pipeline))
+        self.logger.info("ScriptLoader initialized", pipeline_steps=len(self.pipeline))
 
 
     def _apply_pipeline(self, text: str) -> str:
@@ -74,10 +74,9 @@ class ScriptLoader:
             ValueError: If the file format is incorrect or columns are missing.
             RuntimeError: If an unexpected error occurs during processing.
         """
-        local_logger = logger.bind(file_path=str(file_path))
 
         if not file_path.exists():
-            local_logger.error("File check failed: transcript not found")
+            self.logger.error("File check failed: transcript not found")
             return pd.DataFrame()
 
         try:
@@ -85,11 +84,11 @@ class ScriptLoader:
             df_raw = pd.read_csv(file_path, sep='\t').fillna("")
 
             if not isinstance(df_raw, pd.DataFrame):
-                local_logger.error("IO Error: loaded object is not a DataFrame")
+                self.logger.error("IO Error: loaded object is not a DataFrame")
                 return pd.DataFrame()
 
             if 'speaker' not in df_raw.columns or 'value' not in df_raw.columns:
-                local_logger.error("Validation Error: malformed CSV columns", 
+                self.logger.error("Validation Error: malformed CSV columns", 
                                    columns=list(df_raw.columns))
                 return pd.DataFrame()
 
@@ -110,7 +109,7 @@ class ScriptLoader:
 
             final_count = len(df_final)
 
-            local_logger.info("Processing successful", 
+            self.logger.info("Processing successful", 
                               raw_utterances=initial_count, 
                               clean_utterances=final_count,
                               reduction_ratio=round(1 - (final_count/initial_count if initial_count > 0 else 0), 2))
@@ -118,6 +117,6 @@ class ScriptLoader:
             return df_final.reset_index(drop=True)
 
         except Exception as e:
-            local_logger.exception("Pipeline execution failed", error=str(e))
+            self.logger.exception("Pipeline execution failed", error=str(e))
             raise RuntimeError(f"Error processing {file_path}") from e
 

@@ -18,7 +18,7 @@ load_dotenv("../.env", override=True)
 configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
 logger = get_logger().bind(module="train_pipeline")
 
-def run_full_pipeline():
+def main():
     # 1. Resource Initialization
     paths = {
         "raw": Path(os.getenv("DATASET_RAW_DIR", "../dataset/raw")),
@@ -103,5 +103,5 @@ def run_full_pipeline():
     )
 
 if __name__ == "__main__":
-    run_full_pipeline()
+    main()
 
