@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from src.data.labels import load_labels
 
 class MultiMTRBDataset(Dataset):
-    def __init__(self, features_dir: Path, labels_csv: Path, clean_dir: Path|None = None, max_seq=300):
+    def __init__(self, features_dir: Path, labels_csv: Path, clean_dir: Path|None = None, max_seq=200):
         self.features_dir = features_dir
         self.clean_dir = clean_dir
         self.max_seq = max_seq

@@ -13,8 +13,8 @@ class UnifiedXAISuite:
             "feat": Path(os.getenv("DATASET_FEATURES_DIR", "../dataset/features")),
             "clean": Path(os.getenv("DATASET_CLEAN_DIR", "../dataset/clean")),
             "dev_csv": Path(os.getenv("DEV_SPLIT", "../dataset/dev_split_Depression_AVEC2017.csv")),
-            "weights": Path(os.getenv("MODEL_DIR", "../outputs")) / "mtrb_model.pt",
-            "params": Path(os.getenv("MODEL_DIR", "../outputs")) / "best_params.json"
+            "weights": Path(os.getenv("MODEL_DIR", "../outputs/models")) / "mtrb_model.pt",
+            "params": Path(os.getenv("OUTPUTS_DIR", "../outputs")) / "best_params.json"
         }
         self.model = self._load_model()
 
@@ -32,7 +32,7 @@ class UnifiedXAISuite:
         return model.eval()
 
     def run_clinical_explanation(self, participant_id: str):
-        feat_path = self.paths["feat"] / f"{participant_id}_RESNET.pt"
+        feat_path = self.paths["feat"] / f"{participant_id}_FEATURES.pt"
         text_path = self.paths["clean"] / f"{participant_id}_CLEAN.csv"
 
         feat = torch.load(feat_path).to(self.device)

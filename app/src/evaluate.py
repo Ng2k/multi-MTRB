@@ -11,7 +11,6 @@ from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
 from src.utils.logger import configure_logger, get_logger
 
-# --- Configuration & Setup ---
 load_dotenv("../.env", override=True)
 configure_logger(os.getenv("PYTHON_ENV") == "production", log_level="INFO")
 logger = get_logger().bind(module="evaluation")
@@ -21,8 +20,8 @@ def run_evaluation():
         "feat": Path(os.getenv("DATASET_FEATURES_DIR", "../dataset/features")),
         "test_csv": Path(os.getenv("TEST_SPLIT", "../dataset/dev_split_Depression_AVEC2017.csv")),
         "outputs": Path(os.getenv("MODEL_DIR", "../outputs")),
-        "model_weights": Path(os.getenv("MODEL_DIR", "../outputs")) / "mtrb_model.pt",
-        "best_params": Path(os.getenv("MODEL_DIR", "../outputs")) / "best_params.json"
+        "model_weights": Path(os.getenv("MODEL_DIR", "../outputs/models")) / "mtrb_model.pt",
+        "best_params": Path(os.getenv("OUTPUTS_DIR", "../outputs")) / "best_params.json"
     }
 
     # 1. Load Hyperparameters to prevent architecture mismatch

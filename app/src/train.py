@@ -25,7 +25,8 @@ def run_full_pipeline():
         "clean": Path(os.getenv("DATASET_CLEAN_DIR", "../dataset/clean")),
         "feat": Path(os.getenv("DATASET_FEATURES_DIR", "../dataset/features")),
         "train_csv": Path(os.getenv("TRAIN_SPLIT", "../dataset/train_split_Depression_AVEC2017.csv")),
-        "outputs": Path(os.getenv("MODEL_DIR", "../outputs"))
+        "models": Path(os.getenv("MODEL_DIR", "../outputs/models")),
+        "outputs": Path(os.getenv("OUTPUTS", "../outputs"))
     }
     paths["outputs"].mkdir(parents=True, exist_ok=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,7 +69,7 @@ def run_full_pipeline():
     # Ensure random_state matches Config.SEED for consistency with the search trials
     skf = StratifiedKFold(n_splits=Config.N_SPLITS, shuffle=True, random_state=Config.SEED)
 
-    trainer = MTRBTrainer(device, paths["feat"], paths["outputs"], overrides=overrides)
+    trainer = MTRBTrainer(device, paths["feat"], paths["models"], overrides=overrides)
     fold_results = []
 
     logger.info("Starting Final 5-Fold Cross-Validation")
@@ -86,8 +87,8 @@ def run_full_pipeline():
     std_auprc = np.std(fold_results).item()
     best_fold_idx = (np.argmax(fold_results) + 1).item()
 
-    best_fold = paths["outputs"] / f"mtrb_fold_{best_fold_idx}.pt"
-    production_path = paths["outputs"] / "mtrb_model.pt"
+    best_fold = paths["models"] / f"mtrb_fold_{best_fold_idx}.pt"
+    production_path = paths["models"] / "mtrb_model.pt"
 
     if best_fold.exists():
         best_weights = torch.load(best_fold, map_location=device, weights_only=True)
