@@ -25,7 +25,7 @@ def run_evaluation():
         "best_params": Path(os.getenv("MODEL_DIR", "../outputs")) / "best_params.json"
     }
 
-    # 1. Load Hyperparameters to prevent architecture mismatch (Phase 4 fix)
+    # 1. Load Hyperparameters to prevent architecture mismatch
     overrides = {}
     if paths["best_params"].exists():
         with open(paths["best_params"], "r") as f:
@@ -34,17 +34,17 @@ def run_evaluation():
     else:
         logger.warning("best_params.json not found, using default architecture")
 
-    # 2. Initialize Model with the correct dimensions and heads
+    # 2. Initialize Model with correct dimensions from overrides
     model = MultiMTRBClassifier(
         input_dim=Config.INPUT_DIM,
         hidden_dim=int(overrides.get("hidden_dim", 256)),
         temperature=float(overrides.get("temperature", 0.5)),
-        n_heads=int(overrides.get("n_heads", 4)) # Matches saved weight shapes
+        n_heads=int(overrides.get("n_heads", 4)) 
     ).to(Config.DEVICE)
 
     # 3. Load State Dict
     if not paths["model_weights"].exists():
-        logger.error(f"Model weights not found at {paths['model_weights']}")
+        logger.error(f"Model weights not found at {paths['model_weights']}. Ensure you renamed or selected the correct fold file.")
         return
 
     model.load_state_dict(torch.load(paths["model_weights"], map_location=Config.DEVICE, weights_only=True))
@@ -60,6 +60,7 @@ def run_evaluation():
     with torch.no_grad():
         for i in range(len(test_ds)):
             x, y = test_ds[i]
+            # Standard inference: Unsqueeze to add batch dimension
             x = x.unsqueeze(0).to(Config.DEVICE)
 
             logits, _, _ = model(x)
@@ -68,10 +69,9 @@ def run_evaluation():
             all_probs.append(prob)
             all_targets.append(int(y.item()))
 
-    # 5. Clinical Thresholding (Targeting 75% Recall for Phase 3/4)
+    # 5. Clinical Thresholding (Targeting 75% Recall)
     precisions, recalls, thresholds = precision_recall_curve(all_targets, all_probs)
 
-    # Find the threshold that yields at least 75% recall
     target_recall = 0.75
     idx = np.where(recalls >= target_recall)[0][-1]
     clinical_threshold = thresholds[idx]
@@ -89,6 +89,7 @@ def run_evaluation():
     print("\n" + "="*60)
     print(f"{'MULTI-MTRB CLINICAL EVALUATION (75% RECALL MODE)':^60}")
     print("="*60)
+    print(f"Model Used:                {paths['model_weights'].name}")
     print(f"Clinical Threshold:        {clinical_threshold:.4f}")
     print(f"Recall (Sensitivity):      {recalls[idx]*100:.1f}%")
     print(f"Precision:                 {precisions[idx]*100:.1f}%")
@@ -109,4 +110,3 @@ def run_evaluation():
 
 if __name__ == "__main__":
     run_evaluation()
-

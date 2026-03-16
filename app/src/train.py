@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import pandas as pd
 import json
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 from sklearn.model_selection import StratifiedKFold
@@ -10,8 +11,6 @@ from sklearn.model_selection import StratifiedKFold
 from src.config import Config
 from src.utils.logger import configure_logger, get_logger
 from src.utils.mtrb_trainer import MTRBTrainer
-from src.cleaning.parallel_processor import ParallelCleaner
-from src.features.manager import FeatureManager
 from src.data.dataset import MultiMTRBDataset
 
 # --- Configuration & Setup ---
@@ -31,17 +30,23 @@ def run_full_pipeline():
     paths["outputs"].mkdir(parents=True, exist_ok=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # 2. Preprocessing
-    logger.info("Starting Data Preprocessing")
-    ParallelCleaner().run(paths["raw"], paths["clean"])
-    FeatureManager(paths["clean"], paths["feat"]).process_all()
+    # Start tracking total training time
+    start_time = time.time()
 
-    # 3. Load Hyperparameters (Search results from random_search.py)
+    # 2. Hardware Optimization & Seeding
+    Config.seed_everything() 
+
+    # 3. Load Best Hyperparameters from Random Search
     best_params_path = paths["outputs"] / "best_params.json"
-    overrides = None
+    overrides = {}
     if best_params_path.exists():
         with open(best_params_path, "r") as f:
             overrides = json.load(f)
+        logger.info("Loaded best parameters from random search", params=overrides)
+    else:
+        logger.warning("best_params.json not found, using default Config settings")
+
+    overrides['trial_idx'] = "FINAL" 
 
     # 4. Dataset Preparation
     full_dataset = MultiMTRBDataset(
@@ -60,11 +65,13 @@ def run_full_pipeline():
     y_stratify = filtered_df[label_col].values
 
     # 5. K-Fold Execution
+    # Ensure random_state matches Config.SEED for consistency with the search trials
     skf = StratifiedKFold(n_splits=Config.N_SPLITS, shuffle=True, random_state=Config.SEED)
+
     trainer = MTRBTrainer(device, paths["feat"], paths["outputs"], overrides=overrides)
     fold_results = []
 
-    logger.info("Starting 5-Fold Cross-Validation")
+    logger.info("Starting Final 5-Fold Cross-Validation")
     for fold, (t_idx, v_idx) in enumerate(skf.split(filtered_df, y_stratify), 1):
         train_df_fold = filtered_df.iloc[t_idx]
         val_df_fold = filtered_df.iloc[v_idx]
@@ -73,18 +80,27 @@ def run_full_pipeline():
         fold_results.append(auprc)
         logger.info(f"Fold {fold} Complete", auprc=round(auprc, 4))
 
-    # 6. Finalize Best Model based on AUPRC
-    best_fold_idx = np.argmax(fold_results) + 1
-    best_weights_path = paths["outputs"] / f"mtrb_fold_{best_fold_idx}.pt"
+    # 6. Finalize Reporting
+    total_duration = (time.time() - start_time) / 60
+    avg_auprc = np.mean(fold_results).item()
+    std_auprc = np.std(fold_results).item()
+    best_fold_idx = (np.argmax(fold_results) + 1).item()
+
+    best_fold = paths["outputs"] / f"mtrb_fold_{best_fold_idx}.pt"
     production_path = paths["outputs"] / "mtrb_model.pt"
 
-    if best_weights_path.exists():
-        best_weights = torch.load(best_weights_path, map_location=device, weights_only=True)
+    if best_fold.exists():
+        best_weights = torch.load(best_fold, map_location=device, weights_only=True)
         torch.save(best_weights, production_path)
 
-    logger.info("Pipeline Finished", avg_auprc=round(np.mean(fold_results), 4), best_fold=best_fold_idx)
+    logger.info(
+        "FINAL TRAINING PIPELINE COMPLETE", 
+        average_auprc=round(avg_auprc, 4), 
+        best_fold=best_fold_idx,
+        standard_deviation=round(std_auprc, 4),
+        total_training_time_min=round(total_duration, 2)
+    )
 
 if __name__ == "__main__":
-    Config.seed_everything()
     run_full_pipeline()
 

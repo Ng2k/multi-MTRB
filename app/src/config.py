@@ -18,7 +18,6 @@ class Config:
         np.random.seed(Config.SEED)
         torch.manual_seed(Config.SEED)
         torch.cuda.manual_seed_all(Config.SEED)
-        # Optimized for your RTX 4060 Ti
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True
 

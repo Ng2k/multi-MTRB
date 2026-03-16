@@ -17,7 +17,6 @@ from src.models.mtrb import MultiMTRBClassifier
 from src.data.dataset import MultiMTRBDataset
 from src.utils.logger import get_logger
 
-logger = get_logger().bind(module="mtrb_trainer")
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
@@ -33,6 +32,7 @@ class FocalLoss(nn.Module):
 
 class MTRBTrainer:
     def __init__(self, device: str, features_dir: Path, output_dir: Path, overrides: Optional[Dict[str, Any]] = None):
+        self.logger = get_logger().bind(module="mtrb_trainer")
         self.device = torch.device(device)
         self.features_dir = features_dir
         self.output_dir = output_dir
@@ -136,7 +136,7 @@ class MTRBTrainer:
 
             # Periodic logging to avoid overhead
             if epoch % 10 == 0 or epoch == Config.MAX_EPOCHS or epoch == 1:
-                logger.info(
+                self.logger.info(
                     f"Trial {self.overrides['trial_idx']} | Fold {fold_idx} | Epoch {epoch:03d}", 
                     loss=f"{total_loss/len(train_loader):.4f}", 
                     auprc=f"{cur_auprc:.4f}",
