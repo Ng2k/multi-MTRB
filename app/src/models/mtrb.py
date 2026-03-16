@@ -31,7 +31,7 @@ class RethinkingBlock(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x_norm = self.layer_norm(x)
         attn_logits = self.attention(x_norm)
-        weights = torch.softmax(attn_logits / self.temperature, dim=1)
+        weights = torch.softmax(attn_logits / (self.temperature + 1e-8), dim=1)
         bag_repr = torch.sum(weights * x, dim=1)
         return bag_repr, weights
 
@@ -40,15 +40,11 @@ class MultiMTRBClassifier(nn.Module):
         super().__init__()
         self.n_heads = n_heads
         self.pos_encoder = PositionalEncoding(input_dim)
-
-        # Multi-Head initialization
         self.heads = nn.ModuleList([
             RethinkingBlock(input_dim, hidden_dim, temperature) 
             for _ in range(n_heads)
         ])
-
         self.output_projection = nn.Linear(input_dim * n_heads, input_dim)
-
         self.classifier = nn.Sequential(
             nn.Linear(input_dim, 512),
             nn.LayerNorm(512),
@@ -60,16 +56,13 @@ class MultiMTRBClassifier(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.pos_encoder(x)
         head_outputs, head_weights = [], []
-
         for head in self.heads:
-            bag_repr, weights = head(x)
-            head_outputs.append(bag_repr)
-            head_weights.append(weights)
-
+            br, w = head(x)
+            head_outputs.append(br)
+            head_weights.append(w)
         combined_repr = torch.cat(head_outputs, dim=-1)
         bag_repr = self.output_projection(combined_repr)
         logits = self.classifier(bag_repr)
         avg_weights = torch.mean(torch.stack(head_weights), dim=0)
-
         return logits, avg_weights, bag_repr
 
