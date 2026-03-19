@@ -1,8 +1,6 @@
 """Logging Module.
 
-This module provides a structured logging wrapper using `structlog`. It is designed 
-to handle high-throughput AI inference and training workloads by prioritizing 
-machine-readable outputs, contextual metadata, and operational safety.
+Structured logging wrapper using `structlog`.
 
 The module supports:
     - Context-local variable binding (traceability across function calls).
@@ -12,7 +10,7 @@ The module supports:
 
 Typical usage example:
     from logger import configure_logger, get_logger
-    
+
     configure_logger(enable_json=True)
     log = get_logger()
     log.info("model_loaded", model_version="1.0.4", device="cuda:0")

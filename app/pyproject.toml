@@ -1,16 +1,27 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = """
-    --cov=src 
-    --cov-report=term-missing 
-    --cov-report=html:tests/htmlcov
-"""
+
+addopts = "--cov=src --cov-report=term-missing --cov-report=html:tests/htmlcov"
+
+filterwarnings = [
+    "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+]
 
 [tool.coverage.run]
 data_file = "tests/.coverage"
 source = ["src"]
-omit = ["tests/*", "**/__init__.py"]
+omit = [
+    "tests/*",
+    "**/__init__.py",
+    "src/scripts/*",
+    "src/clean.py",
+    "src/train.py",
+    "src/random_search.py",
+    "src/evaluate.py",
+    "src/extract_features.py",
+]
 
 [tool.coverage.report]
 show_missing = true

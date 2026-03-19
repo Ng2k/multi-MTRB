@@ -1,154 +1,102 @@
 """Module for dual-stream textual feature extraction using RoBERTa and mT5.
 
-This module implements the textual branch of the Multi-MTRB architecture as 
-described in the Nature 2025 publication. It extracts semantic and structural 
-features in parallel to optimize GPU utilization and prepares data for 
-Multiple Instance Learning (MIL).
-
-Typical usage example:
-    extractor = MultiMTRBExtractor()
-    features = extractor.extract_session(cleaned_df)
+Optimized for memory efficiency with utterance batching and robust pooling.
 """
 
-import concurrent.futures
+from typing import List
 import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModel, MT5EncoderModel
-from typing import List
 
-from src.utils.logger import get_logger
-
+from src.utils import get_logger, settings
 
 class MultiMTRBExtractor:
-    """Orchestrates parallel feature extraction from RoBERTa and mT5 models.
-
-    This class manages two Transformer models to capture complementary linguistic 
-    features. It uses multi-threading to dispatch GPU kernels for both models 
-    simultaneously, reducing total inference latency.
-
-    Attributes:
-        device: The torch.device (CUDA or CPU) where models are loaded.
-        roberta_tokenizer: Tokenizer for the RoBERTa model.
-        roberta_model: Pre-trained RoBERTa model for semantic embeddings.
-        mt5_tokenizer: Tokenizer for the mT5 model.
-        mt5_model: Pre-trained mT5 encoder for structural/diverse patterns.
-    """
+    """Orchestrates batch-wise feature extraction from RoBERTa and mT5 models."""
 
     def __init__(
         self, 
         roberta_name: str = "roberta-base", 
-        mt5_name: str = "google/mt5-small"
+        mt5_name: str = "google/mt5-small",
+        batch_size: int = 32
     ) -> None:
-        """Initializes the extractor with pre-trained Transformer models.
-
-        Args:
-            roberta_name: HuggingFace model identifier for RoBERTa.
-            mt5_name: HuggingFace model identifier for mT5.
-        """
         self.logger = get_logger().bind(module="features.text_extractor")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(settings.device)
+        self.batch_size = batch_size
+        self.max_length = settings.token_size
  
         # Initialize RoBERTa
-        self.roberta_tokenizer = AutoTokenizer.from_pretrained(roberta_name)
+        self.roberta_tokenizer = AutoTokenizer.from_pretrained(roberta_name, use_fast=True)
         self.roberta_model = AutoModel.from_pretrained(roberta_name).to(self.device)
  
         # Initialize mT5
-        self.mt5_tokenizer = AutoTokenizer.from_pretrained(mt5_name)
-        self.mt5_model = MT5EncoderModel.from_pretrained(mt5_name).to(self.device)
+        self.mt5_tokenizer = AutoTokenizer.from_pretrained(mt5_name, use_fast=True)
+        self.mt5_model = MT5EncoderModel.from_pretrained(mt5_name).to(self.device) # type: ignore
  
         self.roberta_model.eval()
         self.mt5_model.eval()
  
         self.logger.info(
-            "Multi-MTRB Extractor initialized", 
-            roberta=roberta_name, 
-            mt5=mt5_name, 
+            "Multi-MTRB Extractor initialized with batching", 
+            batch_size=self.batch_size,
             device=str(self.device)
         )
 
-    def _get_roberta_features(self, utterances: List[str]) -> torch.Tensor:
-        """Extracts RoBERTa [CLS] token embeddings.
 
-        Args:
-            utterances: A list of cleaned text strings.
-
-        Returns:
-            A tensor of shape (num_utterances, 768).
-        """
+    def _get_roberta_features(self, batch: List[str]) -> torch.Tensor:
+        """Extracts RoBERTa [CLS] token embeddings for a batch."""
         inputs = self.roberta_tokenizer(
-            utterances, 
+            batch, 
             return_tensors="pt", 
             padding=True, 
             truncation=True, 
-            max_length=128
+            max_length=self.max_length
         ).to(self.device)
 
         with torch.no_grad():
             outputs = self.roberta_model(**inputs)
- 
-        # Return [CLS] token (global semantic representation)
         return outputs.last_hidden_state[:, 0, :].cpu()
 
-    def _get_mt5_features(self, utterances: List[str]) -> torch.Tensor:
-        """Extracts mT5 Mean-Pooled embeddings.
 
-        Args:
-            utterances: A list of cleaned text strings.
-
-        Returns:
-            A tensor of shape (num_utterances, 512).
-        """
+    def _get_mt5_features(self, batch: List[str]) -> torch.Tensor:
+        """Extracts mT5 Mean-Pooled embeddings for a batch."""
         inputs = self.mt5_tokenizer(
-            utterances, 
+            batch, 
             return_tensors="pt", 
             padding=True, 
             truncation=True, 
-            max_length=128
+            max_length=self.max_length
         ).to(self.device)
 
         with torch.no_grad():
             outputs = self.mt5_model(**inputs)
  
-        # Mean Pooling to account for mT5's lack of a dedicated [CLS] token
+        # Robust Mean Pooling using the attention mask
         mask = inputs['attention_mask'].unsqueeze(-1).expand(outputs.last_hidden_state.size()).float()
         sum_embeddings = torch.sum(outputs.last_hidden_state * mask, 1)
         sum_mask = torch.clamp(mask.sum(1), min=1e-9)
         return (sum_embeddings / sum_mask).cpu()
 
+
     def extract_session(self, df: pd.DataFrame) -> torch.Tensor:
-        """Runs dual-stream extraction in parallel and concatenates results.
-
-        This method uses a ThreadPoolExecutor to run RoBERTa and mT5 inference 
-        concurrently. This is effective for GPU tasks as it allows the driver 
-        to queue kernels for both models efficiently.
-
-        Args:
-            df: A pandas DataFrame containing a 'value' column of utterances.
-
-        Returns:
-            A concatenated tensor of shape (num_utterances, 1280).
-            Returns an empty tensor if the DataFrame is empty.
-        """
+        """Runs dual-stream extraction using batching to prevent OOM."""
         utterances = df['value'].tolist()
         if not utterances:
-            self.logger.warning("Empty transcript provided for extraction")
             return torch.empty(0)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            future_roberta = executor.submit(self._get_roberta_features, utterances)
-            future_mt5 = executor.submit(self._get_mt5_features, utterances)
+        all_features = []
 
-            roberta_feats = future_roberta.result()
-            mt5_feats = future_mt5.result()
+        # Process in chunks to manage VRAM
+        for i in range(0, len(utterances), self.batch_size):
+            batch = utterances[i : i + self.batch_size]
 
-        # Concatenate features: (Batch, 768 + 512) -> (Batch, 1280)
-        combined_feats = torch.cat((roberta_feats, mt5_feats), dim=1)
- 
-        self.logger.info(
-            "Multi-MTRB session features extracted", 
-            instances=combined_feats.shape[0], 
-            total_dim=combined_feats.shape[1]
-        )
- 
-        return combined_feats
+            # Extract from both streams
+            roberta_batch = self._get_roberta_features(batch)
+            mt5_batch = self._get_mt5_features(batch)
+
+            # Combine batch features (Batch, 1280)
+            combined_batch = torch.cat((roberta_batch, mt5_batch), dim=1)
+            all_features.append(combined_batch)
+
+        final_tensor = torch.cat(all_features, dim=0)
+        return final_tensor
 

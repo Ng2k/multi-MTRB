@@ -207,8 +207,11 @@ marimo/_lsp/
 __marimo__/
 
 # Dataset + Models
-dataset/
-outputs/models
+datasets/
+app/artifacts/models
+app/artifacts/features
+app/artifacts/*.html
+app/artifacts/*.csv
 
 # logs
 logs/

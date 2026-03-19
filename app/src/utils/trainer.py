@@ -10,10 +10,9 @@ from sklearn.metrics import precision_recall_curve, auc
 from torch.amp.grad_scaler import GradScaler
 from torch.amp.autocast_mode import autocast
 
-from src.config import Config
-from src.models.mtrb import MultiMTRBClassifier
-from src.data.dataset import MultiMTRBDataset
-from src.utils.logger import get_logger
+from src.model import MultiMTRBClassifier
+from src.data import MultiMTRBDataset
+from src.utils import get_logger, settings
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha: float = 0.75, gamma: float = 2.0):
@@ -27,7 +26,7 @@ class FocalLoss(nn.Module):
         F_loss = self.alpha * (1 - pt)**self.gamma * BCE_loss
         return torch.mean(F_loss)
 
-class MTRBTrainer:
+class Trainer:
     def __init__(self, device: str, features_dir: Path, output_dir: Path, overrides: Optional[Dict[str, Any]] = None):
         self.logger = get_logger().bind(module="mtrb_trainer")
         self.device = torch.device(device)
@@ -46,33 +45,33 @@ class MTRBTrainer:
         sampler = WeightedRandomSampler(weights_list, len(weights_list))
 
         return DataLoader(
-            dataset, 
-            batch_size=Config.BATCH_SIZE, 
-            sampler=sampler, 
-            num_workers=0, 
+            dataset,
+            batch_size=settings.batch_size,
+            sampler=sampler,
+            num_workers=0,
             pin_memory=True
         )
 
     def run_fold(self, fold_idx: int, train_df: pd.DataFrame, val_df: pd.DataFrame, save_model: bool = False) -> float:
-        train_ds = MultiMTRBDataset(self.features_dir, train_df, max_seq=Config.MAX_SEQ_LEN) # type: ignore
-        val_ds = MultiMTRBDataset(self.features_dir, val_df, max_seq=Config.MAX_SEQ_LEN)     # type: ignore
+        train_ds = MultiMTRBDataset(self.features_dir, train_df, max_seq=settings.token_size) # type: ignore
+        val_ds = MultiMTRBDataset(self.features_dir, val_df, max_seq=settings.token_size)     # type: ignore
 
         label_col = next(c for c in train_df.columns if 'phq' in c.lower() and 'binary' in c.lower())
 
         train_labels = np.asarray(train_df[label_col].values, dtype=np.int64)
 
         train_loader = self.get_balanced_loader(train_ds, train_labels)
-        val_loader = DataLoader(val_ds, batch_size=Config.BATCH_SIZE, shuffle=False)
+        val_loader = DataLoader(val_ds, batch_size=settings.batch_size, shuffle=False)
 
         model = MultiMTRBClassifier(
-            input_dim=Config.INPUT_DIM,
+            input_dim=settings.input_dim,
             hidden_dim=int(self.overrides.get("hidden_dim", 256)),
             temperature=float(self.overrides.get("temperature", 0.07)),
             n_heads=int(self.overrides.get("n_heads", 8))
         ).to(self.device)
 
         optimizer = torch.optim.AdamW(
-            model.parameters(), 
+            model.parameters(),
             lr=float(self.overrides.get("learning_rate", 1e-4)),
             weight_decay=0.01
         )
@@ -82,7 +81,7 @@ class MTRBTrainer:
 
         best_auprc = 0.0
 
-        for epoch in range(1, Config.MAX_EPOCHS + 1):
+        for epoch in range(1, settings.epochs + 1):
             model.train()
             total_loss = 0
 
