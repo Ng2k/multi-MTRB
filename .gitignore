@@ -219,3 +219,6 @@ logs/
 # Documentation/Artifacts
 tests/htmlcov/
 tests/.coverage
+
+
+note_meeting*.txt
